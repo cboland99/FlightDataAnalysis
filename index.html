@@ -138,6 +138,8 @@
     <section class="page" data-page="engine"><div class="grid" id="g-engine"></div></section>
     <section class="page" data-page="systems"><div class="grid" id="g-systems"></div></section>
     <section class="page" data-page="attitude"><div class="grid" id="g-attitude"></div></section>
+    <section class="page" data-page="autopilot"><div class="grid" id="g-autopilot"></div></section>
+    <section class="page" data-page="avionics"><div class="grid" id="g-avionics"></div></section>
     <section class="page" data-page="map"><div class="grid" id="g-map"></div></section>
     <section class="page" data-page="ops">
       <div class="card full"><h3>Takeoffs &amp; landings <span>runway used for each operation</span></h3>
@@ -146,7 +148,7 @@
       </div>
     </section>
     <section class="page" data-page="alerts">
-      <div class="card full"><h3>Crew alerting (CAS) messages <span>most frequent while logging</span></h3>
+      <div class="card full"><h3>Alerts &amp; annunciations <span>crew-alerting (CAS) and terrain / TAWS messages</span></h3>
         <table id="alerttab"><thead><tr><th>Message</th><th style="text-align:right">Seconds active</th></tr></thead><tbody></tbody></table>
         <div class="note">Persistent advisories such as GEAR DOWN (fixed-gear) or start-up NO&nbsp;COMP flags during AHRS alignment are normal ground/boot artifacts, not in-flight faults.</div>
       </div>
@@ -167,7 +169,16 @@ const COL={
   pwr:'Engine Power (%)', map:'Manifold Press (inch Hg)', rpm:'RPM', oilp:'Oil Press (PSI)',
   oilt:'Oil Temp (deg F)', fqL:'Fuel Qty L (gal)', fqR:'Fuel Qty R (gal)', ff:'Fuel Flow (gal/hour)',
   volts:'Volts', amps:'Batt Amps', agl:'Height Above Ground (ft)', trk:'GPS Ground Track (deg)',
-  navid:'Nav Identifier', navdist:'Nav Distance (nm)',
+  navid:'Nav Identifier', navdist:'Nav Distance (nm)', hdg:'Magnetic Heading (deg)', fpres:'Fuel Press (PSI)',
+  apstate:'Autopilot State', ydstate:'Yaw Damper State', fdlat:'FD Lateral Mode', fdvert:'FD Vertical Mode',
+  fdroll:'FD Roll Command (deg)', fdpitch:'FD Pitch Command (deg)', aproll:'AP Roll Command (deg)', appitch:'AP Pitch Command (deg)',
+  apvs:'AP VS Command (ft/min)', apalt:'AP Altitude Command (ft)', aprtq:'AP Roll Torque (%)', apptq:'AP Pitch Torque (%)', ydtq:'YD Torque (%)',
+  selhdg:'Selected Heading (deg)', selalt:'Selected Altitude (ft)', selvs:'Selected Vertical Speed (ft/min)',
+  xtk:'Nav Cross Track Distance (nm)', cdi:'Horizontal CDI Deflection', navbrg:'Nav Bearing (deg)', navcrs:'Nav Course (deg)',
+  gear:'Gear Down (discrete)', terrain:'Terrain Alert',
+  fixstat:'GPS Fix Status', hfom:'GPS HFOM (ft)', vfom:'GPS VFOM (ft)', sats:'GPS Sats',
+  com1:'COM Frequency 1 (MHz)', com2:'COM Frequency 2 (MHz)', nav1:'NAV Frequency 1 (MHz)', nav2:'NAV Frequency 2 (MHz)',
+  pdelta:'Pitch Delta (deg)', rdelta:'Roll Delta (deg)', ahrsdev:'AHRS 1 Dev (%)', sfddev:'SFD AHRS Dev (%)', xpdr:'Transponder Code',
   cht1:'CHT1 (deg F)',cht2:'CHT2 (deg F)',cht3:'CHT3 (deg F)',cht4:'CHT4 (deg F)',
   egt1:'EGT1 (deg F)',egt2:'EGT2 (deg F)',egt3:'EGT3 (deg F)',egt4:'EGT4 (deg F)', cas:'CAS Alert',
 };
@@ -193,6 +204,12 @@ function hav(la1,lo1,la2,lo2){ const R=3440.065, r=Math.PI/180;
   const a=Math.sin((la2-la1)*r/2)**2 + Math.cos(la1*r)*Math.cos(la2*r)*Math.sin((lo2-lo1)*r/2)**2;
   return 2*R*Math.asin(Math.sqrt(Math.max(0,Math.min(1,a)))); }
 
+function stateSegs(mask, elapsed, minSecs=5, mergeGap=5){
+  const n=mask.length, segs=[]; let i=0;
+  while(i<n){ if(mask[i]){ let j=i; while(j+1<n&&mask[j+1])j++; segs.push([i,j]); i=j+1; } else i++; }
+  const merged=[]; for(const s of segs){ if(merged.length&&s[0]-merged[merged.length-1][1]-1<=mergeGap) merged[merged.length-1][1]=s[1]; else merged.push(s.slice()); }
+  return merged.filter(s=>s[1]-s[0]+1>=minSecs).map(s=>[Math.round(elapsed[s[0]]*1e4)/1e4, Math.round(elapsed[s[1]]*1e4)/1e4]);
+}
 function detectVsegs(balt, vs, elapsed, vsFpm=200, minNet=500, minSecs=45, mergeGap=30){
   const n=vs.length, vsm=new Array(n).fill(0);
   for(let i=0;i<n;i++){ let s=0,c=0; for(let j=Math.max(0,i-7);j<=Math.min(n-1,i+7);j++){ const v=vs[j]; s+=(v==null||Number.isNaN(v))?0:v; c++; } vsm[i]=s/c; }
@@ -275,9 +292,25 @@ function parseLog(text, filename){
   const fuel_flow=nsum(ff.map(v=>v==null?0:v))/3600;
   const avg_gph=nmean(ff.map((v,i)=>air[i]?v:null));
 
-  const cj=gi('cas'), counts=new Map();
-  if(cj>=0) for(let i=0;i<n;i++){ let v=rows[i][cj]; if(v==null)continue; v=v.trim(); if(v==='')continue; counts.set(v,(counts.get(v)||0)+1); }
-  const alerts=[...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([msg,nn])=>({msg,n:nn}));
+  const counts=new Map();
+  for(const key of ['cas','terrain']){ const cj=gi(key); if(cj<0)continue;
+    for(let i=0;i<n;i++){ let v=rows[i][cj]; if(v==null)continue; v=String(v).trim(); if(v==='')continue; counts.set(v,(counts.get(v)||0)+1); } }
+  const alerts=[...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([msg,nn])=>({msg,n:nn}));
+
+  // --- autopilot / flight-director / gear ---
+  const apSt=col('apstate'), ydSt=col('ydstate');
+  const apOn=new Array(n), ydOn=new Array(n);
+  for(let i=0;i<n;i++){ apOn[i]=(apSt[i]==='AP'); ydOn[i]=(ydSt[i]==='YD'); }
+  const apsegs=stateSegs(apOn, elapsed, 5, 5);
+  const gearArr=num('gear'); const gearDn=new Array(n); for(let i=0;i<n;i++) gearDn[i]=(gearArr[i]!=null&&gearArr[i]>0.5);
+  const gearsegs=stateSegs(gearDn, elapsed, 3, 3);
+  let apc=0,ydc=0; for(let i=0;i<n;i++){ if(apOn[i])apc++; if(ydOn[i])ydc++; }
+  const ap_pct=Math.round(100*apc/n), yd_pct=Math.round(100*ydc/n);
+  const fdL=col('fdlat'), fdV=col('fdvert'); const modes=[]; let pm=null;
+  for(let i=0;i<n;i++){ const lat=fdL[i], vert=fdV[i]; if(lat===''&&vert==='')continue;
+    const apf=apOn[i]?'AP':(ydOn[i]?'YD':'off'); const key=lat+'|'+vert+'|'+apf;
+    if(key!==pm){ modes.push({t_local:timeA[i], t_utc:utcA[i], lat:lat||'—', vert:vert||'—', ap:apf}); pm=key; } }
+  if(modes.length>80) modes.length=80;
 
   const om=/_([A-Z0-9]{3,4})\.csv$/i.exec(filename||''); const origin=om?om[1].toUpperCase():'\u2014';
   const hhmm=s=>(s||'').slice(0,5);
@@ -354,6 +387,7 @@ function parseLog(text, filename){
     fuel_flow:Rn(fuel_flow,1), avg_gph:Rn(avg_gph,1),
     g_max:Rn(nmax(num('nacc')),2), g_min:Rn(nmin(num('nacc')),2),
     samples:n, alerts,
+    apsegs:apsegs, gearsegs:gearsegs, ap_pct:ap_pct, yd_pct:yd_pct, modes:modes,
   };
 
   const stride=Math.max(1, Math.floor(n/TARGET_POINTS));
@@ -374,6 +408,12 @@ function parseLog(text, filename){
     volts:L('volts',1),amps:L('amps'),
     pitch:L('pitch',1),roll:L('roll',1),nacc:L('nacc',2),lacc:L('lacc',2),
     lat:L('lat',4),lon:L('lon',4),
+    fpres:L('fpres',1),hdg:L('hdg'),trk:L('trk'),selhdg:L('selhdg'),selalt:L('selalt'),selvs:L('selvs'),
+    fdroll:L('fdroll',1),fdpitch:L('fdpitch',1),aproll:L('aproll',1),appitch:L('appitch',1),
+    apvs:L('apvs'),apalt:L('apalt'),aprtq:L('aprtq'),apptq:L('apptq'),ydtq:L('ydtq'),
+    xtk:L('xtk',2),cdi:L('cdi',2),navbrg:L('navbrg'),navcrs:L('navcrs'),gear:L('gear'),
+    hfom:L('hfom'),vfom:L('vfom'),sats:L('sats'),com1:L('com1',2),com2:L('com2',2),nav1:L('nav1',2),nav2:L('nav2',2),
+    baro:L('baro',2),pdelta:L('pdelta',1),rdelta:L('rdelta',1),ahrsdev:L('ahrsdev'),sfddev:L('sfddev'),xpdr:L('xpdr'),
   };
   const label=`${origin} \u00b7 ${summary.start_local}\u2013${summary.end_local} \u00b7 ${summary.dur_air_h.toFixed(1)} h`;
   return {summary,data,label,basename:filename||'log.csv'};
@@ -382,6 +422,7 @@ function parseLog(text, filename){
 /* ==================== charting engine (Canvas, no dependencies) ==================== */
 let F=[], PAYLOAD={}, DAILY=null, cur=0, activeTab='profile', RESIZERS=[], ACTIVE=null, SMOOTH=11, STATMODE='peak';
 const css=getComputedStyle(document.documentElement); const C=k=>css.getPropertyValue(k).trim();
+const BANDC={climb:'rgba(52,211,153,0.10)',descent:'rgba(251,191,36,0.11)',ap:'rgba(167,139,250,0.13)',gear:'rgba(56,189,248,0.10)'};
 
 function movavg(arr,w){ if(!arr||!w||w<=1)return arr; const n=arr.length,out=new Array(n),h=(w-1)>>1;
   for(let i=0;i<n;i++){ let s=0,c=0; for(let j=i-h;j<=i+h;j++){ if(j<0||j>=n)continue; const v=arr[j]; if(v==null||Number.isNaN(v))continue; s+=v;c++; } out[i]=c?s/c:null; } return out; }
@@ -446,7 +487,7 @@ function LineChart(card, spec, group){
   function computeY(){ yL=spec.yRange?spec.yRange.slice():domY(leftS()); if(spec.y2) yR2=spec.y2Range?spec.y2Range.slice():domY(rightS()); }
   function base(){ computeY(); octx.setTransform(dpr,0,0,dpr,0,0); octx.clearRect(0,0,W,H);
     if(spec.bands) for(const bd of spec.bands){ const a=Math.max(xR[0],bd[0]), b=Math.min(xR[1],bd[1]); if(b<=a)continue;
-      octx.fillStyle = bd[2]==='climb'?'rgba(52,211,153,0.10)':'rgba(251,191,36,0.11)'; octx.fillRect(px(a),mT,px(b)-px(a),H-mT-mB); }
+      octx.fillStyle = BANDC[bd[2]]||'rgba(167,139,250,0.13)'; octx.fillRect(px(a),mT,px(b)-px(a),H-mT-mB); }
     octx.font='10px '+C('--mono'); octx.textBaseline='middle'; octx.lineWidth=1;
     for(const v of ticks(yL[0],yL[1],5)){ if(v<yL[0]||v>yL[1])continue; const y=pyL(v);
       octx.strokeStyle=C('--grid'); octx.beginPath(); octx.moveTo(mL,y); octx.lineTo(W-mR,y); octx.stroke();
@@ -525,6 +566,8 @@ function specs(key){ const s=F[cur].summary, shapes=[];
   if(s.landing_h!=null) shapes.push({x:s.landing_h,color:C('--red')});
   const CY=n=>C('--c'+n);
   const B=s.vsegs||[];
+  const AP=(s.apsegs||[]).map(x=>[x[0],x[1],'ap']);
+  const GR=(s.gearsegs||[]).map(x=>[x[0],x[1],'gear']);
   const R={
     profile:[
       {full:true,height:420,title:'Altitude & vertical speed',sub:'baro / GPS / pressure alt + VS \u00b7 dotted = takeoff & landing',yLabel:'ft MSL',y2:true,y2Label:'ft/min',shapes,
@@ -549,20 +592,49 @@ function specs(key){ const s=F[cur].summary, shapes=[];
        series:[{key:'rpm',name:'RPM',color:C('--cyan')},{key:'map',name:'Manifold',color:C('--amber'),axis:'right'},
                {key:'pwr',name:'% power',color:C('--green'),axis:'right'},{key:'ff',name:'Fuel flow',color:C('--violet'),axis:'right'}]},
       {height:300,title:'Oil temperature & pressure',sub:'shaded = climb / descent',yLabel:'\u00b0F',y2:true,y2Label:'PSI',bands:B,series:[{key:'oilt',name:'Oil temp',color:C('--red')},{key:'oilp',name:'Oil press',color:C('--cyan'),axis:'right'}]},
-      {height:300,title:'Fuel flow & tank quantities',sub:'flow (left) vs tank gallons (right) \u00b7 shaded = climb / descent',yLabel:'gal/hr',y2:true,y2Label:'gal',bands:B,series:[{key:'ff',name:'Fuel flow',color:C('--amber')},{key:'fqL',name:'Qty L',color:C('--cyan'),axis:'right'},{key:'fqR',name:'Qty R',color:C('--green'),axis:'right'}]},
+      {full:true,height:320,title:'Fuel flow, pressure & tank quantities',sub:'flow + pressure (left) vs tank gallons (right) \u00b7 shaded = climb / descent',yLabel:'gal/hr \u00b7 PSI',y2:true,y2Label:'gal',bands:B,series:[{key:'ff',name:'Fuel flow',color:C('--amber')},{key:'fpres',name:'Fuel press',color:C('--pink')},{key:'fqL',name:'Qty L',color:C('--cyan'),axis:'right'},{key:'fqR',name:'Qty R',color:C('--green'),axis:'right'}]},
       {height:300,title:'Engine power',sub:'percent \u00b7 shaded = climb / descent',yLabel:'%',yRange:[0,100],bands:B,series:[{key:'pwr',name:'Power',color:C('--violet')}]},
     ],
     systems:[
       {height:300,title:'Electrical system',sub:'bus voltage & battery current (negative = discharge)',yLabel:'V',y2:true,y2Label:'A',series:[{key:'volts',name:'Bus volts',color:C('--cyan')},{key:'amps',name:'Batt amps',color:C('--amber'),axis:'right'}]},
       {height:300,title:'Total fuel on board',sub:'left + right tank',yLabel:'gal',series:[{key:'ftot',name:'Total fuel',color:C('--green')}]},
+      {height:230,title:'Landing gear',sub:'retractable · 1 = down & locked, 0 = up · shaded = gear down',yLabel:'',yRange:[-0.15,1.15],bands:GR,series:[{key:'gear',name:'Gear down',color:C('--cyan'),nosmooth:true}]},
     ],
     attitude:[
-      {height:300,title:'Attitude',sub:'pitch & bank angle',yLabel:'deg',series:[{key:'pitch',name:'Pitch',color:C('--cyan')},{key:'roll',name:'Roll',color:C('--amber')}]},
-      {height:300,title:'Acceleration',sub:'vertical (normal) & lateral load factor',yLabel:'G',series:[{key:'nacc',name:'Normal G',color:C('--violet')},{key:'lacc',name:'Lateral G',color:C('--pink')}]},
+      {height:300,title:'Attitude',sub:'pitch & bank angle · shaded = autopilot engaged',yLabel:'deg',bands:AP,series:[{key:'pitch',name:'Pitch',color:C('--cyan')},{key:'roll',name:'Roll',color:C('--amber')}]},
+      {height:300,title:'Acceleration',sub:'vertical (normal) & lateral load factor · shaded = autopilot engaged',yLabel:'G',bands:AP,series:[{key:'nacc',name:'Normal G',color:C('--violet')},{key:'lacc',name:'Lateral G',color:C('--pink')}]},
+    ],
+    autopilot:[
+      {full:true,height:300,title:'Roll: actual vs commanded',sub:'aircraft bank vs flight-director / autopilot roll command · shaded = AP engaged',yLabel:'deg bank',bands:AP,
+       series:[{key:'roll',name:'Roll (actual)',color:C('--cyan')},{key:'fdroll',name:'FD command',color:C('--amber')},{key:'aproll',name:'AP command',color:C('--violet'),dash:true,hidden:true}]},
+      {full:true,height:300,title:'Pitch: actual vs commanded',sub:'aircraft pitch vs flight-director pitch command · shaded = AP engaged',yLabel:'deg',bands:AP,
+       series:[{key:'pitch',name:'Pitch (actual)',color:C('--cyan')},{key:'fdpitch',name:'FD command',color:C('--amber')}]},
+      {full:true,height:300,title:'Heading: actual vs selected',sub:'magnetic heading & GPS track vs selected heading bug · shaded = AP engaged',yLabel:'°',yRange:[0,360],bands:AP,
+       series:[{key:'hdg',name:'Mag heading',color:C('--cyan'),nosmooth:true},{key:'trk',name:'GPS track',color:C('--green'),nosmooth:true},{key:'selhdg',name:'Selected (bug)',color:C('--amber'),nosmooth:true}]},
+      {full:true,height:300,title:'Altitude: actual vs selected',sub:'baro altitude vs selected-altitude bug & AP altitude command · shaded = AP engaged',yLabel:'ft MSL',bands:AP,
+       series:[{key:'balt',name:'Baro alt',color:C('--cyan')},{key:'selalt',name:'Selected (bug)',color:C('--amber'),nosmooth:true},{key:'apalt',name:'AP alt cmd',color:C('--violet'),dash:true,hidden:true}]},
+      {height:300,title:'Vertical speed: actual vs commanded',sub:'VS vs AP VS command & selected VS · shaded = AP engaged',yLabel:'ft/min',bands:AP,
+       series:[{key:'vs',name:'VS (actual)',color:C('--cyan')},{key:'apvs',name:'AP VS cmd',color:C('--amber')},{key:'selvs',name:'Selected VS',color:C('--green'),nosmooth:true,hidden:true}]},
+      {height:300,title:'Servo effort (torque)',sub:'how hard the autopilot servos are working · shaded = AP engaged',yLabel:'%',bands:AP,
+       series:[{key:'aprtq',name:'Roll servo',color:C('--cyan')},{key:'apptq',name:'Pitch servo',color:C('--amber')},{key:'ydtq',name:'Yaw servo',color:C('--green')}]},
+      {full:true,height:300,title:'GPS course tracking',sub:'cross-track distance & CDI deflection — how closely the course was held · shaded = AP engaged',yLabel:'nm (xtk)',y2:true,y2Label:'CDI',bands:AP,
+       series:[{key:'xtk',name:'Cross-track',color:C('--cyan')},{key:'cdi',name:'CDI deflection',color:C('--amber'),axis:'right'}]},
+    ],
+    avionics:[
+      {height:300,title:'GPS signal quality',sub:'position uncertainty (HFOM / VFOM) & satellites in view · fix: 3D / 3D-diff (WAAS)',yLabel:'ft',y2:true,y2Label:'sats',
+       series:[{key:'hfom',name:'HFOM',color:C('--cyan')},{key:'vfom',name:'VFOM',color:C('--violet')},{key:'sats',name:'Satellites',color:C('--amber'),axis:'right',nosmooth:true}]},
+      {height:300,title:'Radio frequencies',sub:'COM & NAV tuned frequencies over time',yLabel:'MHz',
+       series:[{key:'com1',name:'COM 1',color:C('--cyan'),nosmooth:true},{key:'com2',name:'COM 2',color:C('--green'),nosmooth:true},
+               {key:'nav1',name:'NAV 1',color:C('--amber'),nosmooth:true},{key:'nav2',name:'NAV 2',color:C('--violet'),nosmooth:true}]},
+      {height:300,title:'AHRS / AFCS health',sub:'attitude-source deltas (primary vs standby) & AHRS deviation %',yLabel:'deg',y2:true,y2Label:'%',
+       series:[{key:'pdelta',name:'Pitch Δ',color:C('--cyan')},{key:'rdelta',name:'Roll Δ',color:C('--amber')},
+               {key:'ahrsdev',name:'AHRS dev',color:C('--violet'),axis:'right'},{key:'sfddev',name:'SFD dev',color:C('--pink'),axis:'right',hidden:true}]},
+      {height:300,title:'Altimeter setting & transponder',sub:'altimeter (Kollsman) setting & transponder code · mode ALT',yLabel:'inHg',y2:true,y2Label:'code',
+       series:[{key:'baro',name:'Baro setting',color:C('--cyan')},{key:'xpdr',name:'Xpdr code',color:C('--amber'),axis:'right',nosmooth:true}]},
     ],
   };
   return R[key]||[]; }
-const TABS=[['profile','Flight profile'],['engine','Engine'],['systems','Systems'],['attitude','Attitude'],['map','Map'],['ops','Runways'],['alerts','Alerts']];
+const TABS=[['profile','Flight profile'],['engine','Engine'],['systems','Systems'],['attitude','Attitude'],['autopilot','Autopilot'],['avionics','Avionics'],['map','Map'],['ops','Runways'],['alerts','Alerts']];
 
 function statCard(k,v,u,x,cls){ return `<div class="stat ${cls||''}"><div class="k">${k}</div><div class="v">${v==null?'\u2014':v}<span class="u"> ${u||''}</span></div>${x?`<div class="x">${x}</div>`:''}</div>`; }
 function fmtH(h){ if(h==null)return'\u2014'; const m=Math.round(h*60); return (m/60|0)+'h '+String(m%60).padStart(2,'0')+'m'; }
@@ -609,6 +681,15 @@ function buildOps(){ const tb=document.querySelector('#opstab tbody'); const ops
     `<td class="msg" style="color:#fff;font-weight:700">${o.rwy?('RWY '+o.rwy):'\u2014'}</td>`+
     `<td class="n">${o.track!=null?o.track+'\u00b0':'\u2014'}</td></tr>`).join('')
     || '<tr><td class="msg">No takeoffs or landings detected</td></tr>'; }
+function buildAPModes(){ const s=F[cur].summary; const grid=document.getElementById('g-autopilot');
+  const c=document.createElement('div'); c.className='card full';
+  const rows=(s.modes||[]).map(m=>`<tr>`+
+    `<td class="msg">${m.t_local}${m.t_utc?` <span style="color:var(--dim)">/ ${m.t_utc}Z</span>`:''}</td>`+
+    `<td class="msg" style="color:#fff">${m.lat}</td><td class="msg" style="color:#fff">${m.vert}</td>`+
+    `<td class="msg" style="color:${m.ap==='AP'?C('--violet'):C('--dim')};font-weight:700">${m.ap==='AP'?'AP':(m.ap==='YD'?'YD only':'hand-flown')}</td></tr>`).join('');
+  c.innerHTML=`<h3>Autopilot &amp; flight-director modes <span>engaged ${s.ap_pct}% · yaw damper ${s.yd_pct}% · each change logged</span></h3>`+
+    `<table><thead><tr><th>Time</th><th>Lateral</th><th>Vertical</th><th>Mode</th></tr></thead><tbody>${rows||'<tr><td class="msg">No mode data</td></tr>'}</tbody></table>`;
+  grid.appendChild(c); }
 function mkcard(key,full,title,sub){ const c=document.createElement('div'); c.className='card'+(full?' full':''); c.innerHTML=`<h3>${title}${sub?` <span>${sub}</span>`:''}</h3>`; document.getElementById('g-'+key).appendChild(c); return c; }
 function drawTab(key){ RESIZERS=[]; document.getElementById('hint').style.display=(key==='alerts'||key==='map'||key==='ops')?'none':'block';
   if(key==='alerts'){ buildAlerts(); return; }
@@ -616,7 +697,8 @@ function drawTab(key){ RESIZERS=[]; document.getElementById('hint').style.displa
   const grid=document.getElementById('g-'+key); grid.innerHTML='';
   if(key==='map'){ MapChart(mkcard(key,true,'Ground track','colored by baro altitude')); return; }
   const group={ xR:null, charts:[], setX(range){ this.xR=range?range.slice():null; for(const c of this.charts) c.setX(range); } };
-  for(const sp of specs(key)) LineChart(mkcard(key,sp.full,sp.title,sp.sub), sp, group); }
+  for(const sp of specs(key)) LineChart(mkcard(key,sp.full,sp.title,sp.sub), sp, group);
+  if(key==='autopilot') buildAPModes(); }
 function selectTab(key){ activeTab=key; document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.k===key));
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.dataset.page===key)); drawTab(key); }
 function loadFlight(i){ cur=i; buildHeader(); buildStats(); selectTab(activeTab); }
