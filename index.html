@@ -140,6 +140,8 @@
     <section class="page" data-page="attitude"><div class="grid" id="g-attitude"></div></section>
     <section class="page" data-page="autopilot"><div class="grid" id="g-autopilot"></div></section>
     <section class="page" data-page="avionics"><div class="grid" id="g-avionics"></div></section>
+    <section class="page" data-page="pitchloop"><div class="grid" id="g-pitchloop"></div></section>
+    <section class="page" data-page="rollloop"><div class="grid" id="g-rollloop"></div></section>
     <section class="page" data-page="map"><div class="grid" id="g-map"></div></section>
     <section class="page" data-page="ops">
       <div class="card full"><h3>Takeoffs &amp; landings <span>runway used for each operation</span></h3>
@@ -173,6 +175,7 @@ const COL={
   apstate:'Autopilot State', ydstate:'Yaw Damper State', fdlat:'FD Lateral Mode', fdvert:'FD Vertical Mode',
   fdroll:'FD Roll Command (deg)', fdpitch:'FD Pitch Command (deg)', aproll:'AP Roll Command (deg)', appitch:'AP Pitch Command (deg)',
   apvs:'AP VS Command (ft/min)', apalt:'AP Altitude Command (ft)', aprtq:'AP Roll Torque (%)', apptq:'AP Pitch Torque (%)', ydtq:'YD Torque (%)',
+  apptt:'AP Pitch Trim Torque (%)', fdalt:'FD Altitude (ft)', vnavalt:'VNAV Altitude (ft)',
   selhdg:'Selected Heading (deg)', selalt:'Selected Altitude (ft)', selvs:'Selected Vertical Speed (ft/min)',
   xtk:'Nav Cross Track Distance (nm)', cdi:'Horizontal CDI Deflection', navbrg:'Nav Bearing (deg)', navcrs:'Nav Course (deg)',
   gear:'Gear Down (discrete)', terrain:'Terrain Alert',
@@ -414,6 +417,7 @@ function parseLog(text, filename){
     xtk:L('xtk',2),cdi:L('cdi',2),navbrg:L('navbrg'),navcrs:L('navcrs'),gear:L('gear'),
     hfom:L('hfom'),vfom:L('vfom'),sats:L('sats'),com1:L('com1',2),com2:L('com2',2),nav1:L('nav1',2),nav2:L('nav2',2),
     baro:L('baro',2),pdelta:L('pdelta',1),rdelta:L('rdelta',1),ahrsdev:L('ahrsdev'),sfddev:L('sfddev'),xpdr:L('xpdr'),
+    fdalt:L('fdalt'),vnavalt:L('vnavalt'),apptt:L('apptt'),
   };
   const label=`${origin} \u00b7 ${summary.start_local}\u2013${summary.end_local} \u00b7 ${summary.dur_air_h.toFixed(1)} h`;
   return {summary,data,label,basename:filename||'log.csv'};
@@ -632,9 +636,36 @@ function specs(key){ const s=F[cur].summary, shapes=[];
       {height:300,title:'Altimeter setting & transponder',sub:'altimeter (Kollsman) setting & transponder code · mode ALT',yLabel:'inHg',y2:true,y2Label:'code',
        series:[{key:'baro',name:'Baro setting',color:C('--cyan')},{key:'xpdr',name:'Xpdr code',color:C('--amber'),axis:'right',nosmooth:true}]},
     ],
+    pitchloop:[
+      {full:true,height:360,title:'Pitch chain — altitude: target vs actual',sub:'targets dashed (bug, AP/FD/VNAV cmd) vs actual altitude · zoom into a level-off to read lead/lag · shaded = AP engaged',yLabel:'ft MSL',bands:AP,
+       series:[{key:'selalt',name:'Selected (bug)',color:C('--amber'),nosmooth:true,dash:true},
+               {key:'apalt',name:'AP alt cmd',color:C('--violet'),dash:true},
+               {key:'fdalt',name:'FD altitude',color:C('--green'),dash:true,hidden:true},
+               {key:'vnavalt',name:'VNAV alt',color:C('--pink'),dash:true,hidden:true},
+               {key:'balt',name:'Baro alt (actual)',color:C('--cyan')},
+               {key:'palt',name:'Pressure alt',color:C('--dim'),hidden:true},
+               {key:'galt',name:'GPS alt',color:C('--lime'),hidden:true}]},
+      {full:true,height:320,title:'Pitch chain — command vs response',sub:'FD/AP pitch command (leading) vs actual pitch (trailing) · shaded = AP engaged',yLabel:'deg',bands:AP,
+       series:[{key:'fdpitch',name:'FD pitch cmd',color:C('--amber')},
+               {key:'appitch',name:'AP pitch cmd',color:C('--violet')},
+               {key:'pitch',name:'Pitch (actual)',color:C('--cyan')},
+               {key:'pdelta',name:'Pitch Δ (AHRS)',color:C('--dim'),hidden:true}]},
+      {full:true,height:300,title:'Pitch chain — servo & trim effort',sub:'elevator servo torque & pitch-trim torque · the last link before the airplane moves · shaded = AP engaged',yLabel:'%',bands:AP,
+       series:[{key:'apptq',name:'Pitch servo torque',color:C('--cyan')},
+               {key:'apptt',name:'Pitch trim torque',color:C('--amber')}]},
+    ],
+    rollloop:[
+      {full:true,height:360,title:'Roll chain — command vs response',sub:'FD/AP roll command (leading) vs actual bank (trailing) · shaded = AP engaged',yLabel:'deg bank',bands:AP,
+       series:[{key:'fdroll',name:'FD roll cmd',color:C('--amber')},
+               {key:'aproll',name:'AP roll cmd',color:C('--violet')},
+               {key:'roll',name:'Roll (actual)',color:C('--cyan')},
+               {key:'rdelta',name:'Roll Δ (AHRS)',color:C('--dim'),hidden:true}]},
+      {full:true,height:300,title:'Roll chain — servo effort',sub:'aileron servo torque · the last link before the airplane rolls · shaded = AP engaged',yLabel:'%',bands:AP,
+       series:[{key:'aprtq',name:'Roll servo torque',color:C('--cyan')}]},
+    ],
   };
   return R[key]||[]; }
-const TABS=[['profile','Flight profile'],['engine','Engine'],['systems','Systems'],['attitude','Attitude'],['autopilot','Autopilot'],['avionics','Avionics'],['map','Map'],['ops','Runways'],['alerts','Alerts']];
+const TABS=[['profile','Flight profile'],['engine','Engine'],['systems','Systems'],['attitude','Attitude'],['autopilot','Autopilot'],['avionics','Avionics'],['pitchloop','Pitch loop'],['rollloop','Roll loop'],['map','Map'],['ops','Runways'],['alerts','Alerts']];
 
 function statCard(k,v,u,x,cls){ return `<div class="stat ${cls||''}"><div class="k">${k}</div><div class="v">${v==null?'\u2014':v}<span class="u"> ${u||''}</span></div>${x?`<div class="x">${x}</div>`:''}</div>`; }
 function fmtH(h){ if(h==null)return'\u2014'; const m=Math.round(h*60); return (m/60|0)+'h '+String(m%60).padStart(2,'0')+'m'; }
@@ -697,8 +728,12 @@ function drawTab(key){ RESIZERS=[]; document.getElementById('hint').style.displa
   const grid=document.getElementById('g-'+key); grid.innerHTML='';
   if(key==='map'){ MapChart(mkcard(key,true,'Ground track','colored by baro altitude')); return; }
   const group={ xR:null, charts:[], setX(range){ this.xR=range?range.slice():null; for(const c of this.charts) c.setX(range); } };
-  for(const sp of specs(key)) LineChart(mkcard(key,sp.full,sp.title,sp.sub), sp, group);
-  if(key==='autopilot') buildAPModes(); }
+  const D=F[cur].data;
+  const hasData=sp=>sp.series.some(s=>{ const a=D[s.key]; return a && a.some(v=>v!=null); });
+  const drawable=specs(key).filter(hasData);
+  for(const sp of drawable) LineChart(mkcard(key,sp.full,sp.title,sp.sub), sp, group);
+  if(key==='autopilot') buildAPModes();
+  else if(!drawable.length){ const c=mkcard(key,true,'No data',''); c.querySelector('h3').innerHTML='No data for this view <span>none of these channels are present in this log</span>'; } }
 function selectTab(key){ activeTab=key; document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.k===key));
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.dataset.page===key)); drawTab(key); }
 function loadFlight(i){ cur=i; buildHeader(); buildStats(); selectTab(activeTab); }
