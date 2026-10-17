@@ -100,6 +100,31 @@
   .smooth{display:flex;align-items:center;gap:8px;flex:none}
   .smooth label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
   .smooth select{padding:5px 9px;font-size:12px}
+  .cpanel{display:flex;flex-wrap:wrap;gap:14px 20px;margin:4px 2px 12px}
+  .cgroup{min-width:0}
+  .cgh{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin:0 0 5px}
+  .cgi{display:flex;flex-wrap:wrap;gap:5px;max-width:340px}
+  .cchip{background:var(--panelhi);color:var(--mut);border:1px solid var(--edge);border-radius:7px;padding:4px 9px;font:500 11px var(--body);cursor:pointer}
+  .cchip:hover{color:var(--ink)}
+  .cchip.on{background:rgba(56,189,248,.16);color:#fff;border-color:var(--cyan)}
+  .csel{display:flex;flex-direction:column;gap:5px;margin:4px 2px 12px;padding-top:10px;border-top:1px solid var(--edge)}
+  .crow{display:flex;align-items:center;gap:9px}
+  .crow i{width:13px;height:3px;border-radius:2px;flex:none}
+  .cnm{font-size:13px;color:var(--ink);flex:1;min-width:0}
+  .cnm em{color:var(--dim);font-style:normal;font-size:11px;margin-left:4px}
+  .cnm.dead{color:var(--dim);text-decoration:line-through}
+  .cax{display:flex;flex:none}
+  .cab{background:var(--panel);color:var(--mut);border:1px solid var(--edge);padding:3px 9px;font:600 11px var(--mono);cursor:pointer}
+  .cab:first-child{border-radius:7px 0 0 7px} .cab:last-child{border-radius:0 7px 7px 0;border-left:0} .cab:nth-child(2){border-left:0}
+  .cab.on{background:var(--panelhi);color:#fff;border-color:var(--cyan)}
+  .crm{background:none;border:0;color:var(--dim);cursor:pointer;font-size:13px;padding:2px 4px;flex:none}
+  .crm:hover{color:var(--red)}
+  .caxes{display:flex;flex-direction:column;gap:6px;margin:0 2px;padding-top:10px;border-top:1px solid var(--edge)}
+  .caxrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .caxrow.dim{opacity:.4}
+  .caxl{font-size:12px;color:var(--ink);min-width:130px} .caxl em{color:var(--dim);font-style:normal;font-size:11px;margin-left:4px}
+  .caxrow input{background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:7px;padding:4px 8px;font:500 12px var(--mono);width:110px}
+  .caxauto{background:var(--panel);color:var(--mut);border:1px solid var(--edge);border-radius:7px;padding:4px 10px;font:600 11px var(--body);cursor:pointer}
+  .caxauto:hover{color:var(--ink);border-color:var(--cyan)}
   footer{margin-top:30px;padding-top:14px;border-top:1px solid var(--edge);font-size:11px;color:var(--dim);font-family:var(--mono)}
   @media(max-width:760px){ .grid{grid-template-columns:1fr} .tail{font-size:30px} .dayband.on{grid-template-columns:repeat(2,1fr)} }
 </style>
@@ -142,6 +167,7 @@
     <section class="page" data-page="avionics"><div class="grid" id="g-avionics"></div></section>
     <section class="page" data-page="pitchloop"><div class="grid" id="g-pitchloop"></div></section>
     <section class="page" data-page="rollloop"><div class="grid" id="g-rollloop"></div></section>
+    <section class="page" data-page="custom"><div class="grid" id="g-custom"></div></section>
     <section class="page" data-page="map"><div class="grid" id="g-map"></div></section>
     <section class="page" data-page="ops">
       <div class="card full"><h3>Takeoffs &amp; landings <span>runway used for each operation</span></h3>
@@ -473,30 +499,35 @@ function LineChart(card, spec, group){
   const tip=document.createElement('div'); tip.className='tip';
   holder.appendChild(cv); holder.appendChild(tip); card.appendChild(holder);
   const ctx=cv.getContext('2d'); const off=document.createElement('canvas'); const octx=off.getContext('2d');
-  const H=spec.height||300, mL=54, mR=spec.y2?58:18, mT=8, mB=32;
+  const axOf=s=> s.ax!=null?s.ax : (s.axis==='right'?1:0);
+  const usedRight=[1,2].filter(a=>series.some(s=>axOf(s)===a));
+  const H=spec.height||300, mL=54, mR=18+40*usedRight.length, mT=8, mB=32;
   let W=600,dpr=1,sel=null;
   const t=D.t, xFull=[t[0],t[t.length-1]]; let xR=group.xR?group.xR.slice():xFull.slice();
-  let yL=[0,1], yR2=[0,1];
-  const leftS=()=>series.filter(s=>s.axis!=='right'&&!hidden.has(s.key));
-  const rightS=()=>series.filter(s=>s.axis==='right'&&!hidden.has(s.key));
+  let yD=[[0,1],[0,1],[0,1]];
+  const alist=a=>series.filter(s=>axOf(s)===a&&!hidden.has(s.key));
   const px=v=>mL+(v-xR[0])/(xR[1]-xR[0])*(W-mL-mR);
-  const pyL=v=>mT+(1-(v-yL[0])/(yL[1]-yL[0]))*(H-mT-mB);
-  const pyR=v=>mT+(1-(v-yR2[0])/(yR2[1]-yR2[0]))*(H-mT-mB);
+  const pyFns=[0,1,2].map(a=>(v=>mT+(1-(v-yD[a][0])/(yD[a][1]-yD[a][0]))*(H-mT-mB)));
+  const pyL=pyFns[0];
   let _lvl=-1,_smc={}; function sm(key){ if(_lvl!==SMOOTH){_smc={};_lvl=SMOOTH;} if(!(key in _smc))_smc[key]=movavg(D[key],SMOOTH); return _smc[key]; }
   function ser(s){ return s.nosmooth?D[s.key]:sm(s.key); }
   function domY(list){ let mn=Infinity,mx=-Infinity;
     for(const s of list){ const y=ser(s); for(let i=0;i<t.length;i++){ if(t[i]<xR[0]||t[i]>xR[1])continue; const v=y[i];
       if(v==null)continue; if(v<mn)mn=v; if(v>mx)mx=v; } }
     if(mn===Infinity)return[0,1]; if(mn===mx){mn-=1;mx+=1;} const pad=(mx-mn)*0.06; return[mn-pad,mx+pad]; }
-  function computeY(){ yL=spec.yRange?spec.yRange.slice():domY(leftS()); if(spec.y2) yR2=spec.y2Range?spec.y2Range.slice():domY(rightS()); }
+  function rangeFor(a){ const hard=a===0?spec.yRange:a===1?spec.y2Range:spec.y3Range; if(hard)return hard.slice();
+    const auto=domY(alist(a)); const man=spec.axisMan&&spec.axisMan[a];
+    if(man) return [man.min!=null?man.min:auto[0], man.max!=null?man.max:auto[1]]; return auto; }
+  function computeY(){ yD[0]=rangeFor(0); yD[1]=rangeFor(1); yD[2]=rangeFor(2); }
   function base(){ computeY(); octx.setTransform(dpr,0,0,dpr,0,0); octx.clearRect(0,0,W,H);
     if(spec.bands) for(const bd of spec.bands){ const a=Math.max(xR[0],bd[0]), b=Math.min(xR[1],bd[1]); if(b<=a)continue;
       octx.fillStyle = BANDC[bd[2]]||'rgba(167,139,250,0.13)'; octx.fillRect(px(a),mT,px(b)-px(a),H-mT-mB); }
     octx.font='10px '+C('--mono'); octx.textBaseline='middle'; octx.lineWidth=1;
-    for(const v of ticks(yL[0],yL[1],5)){ if(v<yL[0]||v>yL[1])continue; const y=pyL(v);
+    for(const v of ticks(yD[0][0],yD[0][1],5)){ if(v<yD[0][0]||v>yD[0][1])continue; const y=pyL(v);
       octx.strokeStyle=C('--grid'); octx.beginPath(); octx.moveTo(mL,y); octx.lineTo(W-mR,y); octx.stroke();
       octx.textAlign='right'; octx.fillStyle=C('--mut'); octx.fillText(fmt(v),mL-6,y); }
-    if(spec.y2){ octx.textAlign='left'; for(const v of ticks(yR2[0],yR2[1],5)){ if(v<yR2[0]||v>yR2[1])continue; octx.fillStyle=C('--mut'); octx.fillText(fmt(v),W-mR+6,pyR(v)); } }
+    usedRight.forEach((a,idx)=>{ octx.textAlign='left'; const xcol=(W-mR)+6+idx*40;
+      for(const v of ticks(yD[a][0],yD[a][1],5)){ if(v<yD[a][0]||v>yD[a][1])continue; octx.fillStyle=C('--mut'); octx.fillText(fmt(v),xcol,pyFns[a](v)); } });
     octx.textAlign='center'; octx.textBaseline='top';
     for(const v of ticks(xR[0],xR[1],6)){ if(v<xR[0]||v>xR[1])continue; const x=px(v);
       octx.strokeStyle=C('--grid'); octx.beginPath(); octx.moveTo(x,mT); octx.lineTo(x,H-mB); octx.stroke();
@@ -507,7 +538,7 @@ function LineChart(card, spec, group){
     if(spec.shapes) for(const sh of spec.shapes){ if(sh.x<xR[0]||sh.x>xR[1])continue; const x=px(sh.x);
       octx.strokeStyle=sh.color; octx.setLineDash([3,3]); octx.beginPath(); octx.moveTo(x,mT); octx.lineTo(x,H-mB); octx.stroke(); octx.setLineDash([]); }
     octx.lineWidth=1.5; octx.lineJoin='round';
-    for(const s of series){ if(hidden.has(s.key))continue; const y=ser(s), pyf=s.axis==='right'?pyR:pyL;
+    for(const s of series){ if(hidden.has(s.key))continue; const y=ser(s), pyf=pyFns[axOf(s)];
       octx.strokeStyle=s.color; if(s.dash)octx.setLineDash([5,3]); octx.beginPath(); let pen=false;
       for(let i=0;i<t.length;i++){ if(t[i]<xR[0]-0.002||t[i]>xR[1]+0.002){pen=false;continue;} const v=y[i];
         if(v==null){pen=false;continue;} const X=px(t[i]),Y=pyf(v); if(!pen){octx.moveTo(X,Y);pen=true;}else octx.lineTo(X,Y); }
@@ -519,7 +550,7 @@ function LineChart(card, spec, group){
       ctx.strokeStyle=C('--dim'); ctx.setLineDash([2,2]); ctx.beginPath(); ctx.moveTo(X,mT); ctx.lineTo(X,H-mB); ctx.stroke(); ctx.setLineDash([]);
       let rows=`<div class="tth">${D.local[i]}${D.utc&&D.utc[i]?` / ${D.utc[i]}Z`:''}<span>${t[i].toFixed(2)} h</span></div>`;
       for(const s of series){ if(hidden.has(s.key))continue; const v=ser(s)[i];
-        if(v!=null){ const Y=(s.axis==='right'?pyR:pyL)(v); ctx.fillStyle=s.color; ctx.beginPath(); ctx.arc(X,Y,2.6,0,7); ctx.fill(); }
+        if(v!=null){ const Y=pyFns[axOf(s)](v); ctx.fillStyle=s.color; ctx.beginPath(); ctx.arc(X,Y,2.6,0,7); ctx.fill(); }
         rows+=`<div class="ttr"><i style="background:${s.color}"></i>${s.name}<b>${fmt(v)}</b></div>`; }
       tip.innerHTML=rows; tip.style.display='block'; let tx=X+12; if(tx+tip.offsetWidth>W-4)tx=X-12-tip.offsetWidth; tip.style.left=Math.max(2,tx)+'px'; tip.style.top=(mT+4)+'px'; }
     else tip.style.display='none'; }
@@ -665,7 +696,92 @@ function specs(key){ const s=F[cur].summary, shapes=[];
     ],
   };
   return R[key]||[]; }
-const TABS=[['profile','Flight profile'],['engine','Engine'],['systems','Systems'],['attitude','Attitude'],['autopilot','Autopilot'],['avionics','Avionics'],['pitchloop','Pitch loop'],['rollloop','Roll loop'],['map','Map'],['ops','Runways'],['alerts','Alerts']];
+/* ---------------- custom plot ---------------- */
+const CHGROUPS=[
+  ['Flight & air',[['balt','Baro altitude','ft'],['galt','GPS altitude','ft'],['palt','Pressure altitude','ft'],['vs','Vertical speed','ft/min'],['ias','Indicated airspeed','kt'],['tas','True airspeed','kt'],['gs','Ground speed','kt'],['oat','Outside air temp','°C'],['densalt','Density altitude','ft'],['wspd','Wind speed','kt'],['wdir','Wind direction','°'],['hdg','Mag heading','°'],['trk','GPS track','°']]],
+  ['Engine',[['rpm','RPM','rpm'],['map','Manifold press','inHg'],['pwr','Engine power','%'],['oilp','Oil pressure','psi'],['oilt','Oil temp','°F'],['cht1','CHT 1','°F'],['cht2','CHT 2','°F'],['cht3','CHT 3','°F'],['cht4','CHT 4','°F'],['egt1','EGT 1','°F'],['egt2','EGT 2','°F'],['egt3','EGT 3','°F'],['egt4','EGT 4','°F']]],
+  ['Fuel',[['ff','Fuel flow','gph'],['fpres','Fuel pressure','psi'],['fqL','Fuel qty L','gal'],['fqR','Fuel qty R','gal'],['ftot','Fuel total','gal']]],
+  ['Electrical',[['volts','Bus volts','V'],['amps','Battery amps','A']]],
+  ['Attitude',[['pitch','Pitch','°'],['roll','Roll','°'],['nacc','Normal G','G'],['lacc','Lateral G','G'],['pdelta','Pitch Δ','°'],['rdelta','Roll Δ','°']]],
+  ['Autopilot',[['fdroll','FD roll cmd','°'],['fdpitch','FD pitch cmd','°'],['aproll','AP roll cmd','°'],['appitch','AP pitch cmd','°'],['apvs','AP VS cmd','ft/min'],['apalt','AP alt cmd','ft'],['aprtq','AP roll torque','%'],['apptq','AP pitch torque','%'],['apptt','AP pitch trim torque','%'],['ydtq','YD torque','%'],['selhdg','Selected heading','°'],['selalt','Selected altitude','ft'],['selvs','Selected VS','ft/min'],['fdalt','FD altitude','ft'],['vnavalt','VNAV altitude','ft']]],
+  ['Nav',[['xtk','Cross-track','nm'],['cdi','CDI deflection',''],['navbrg','Nav bearing','°'],['navcrs','Nav course','°']]],
+  ['Avionics',[['hfom','GPS HFOM','ft'],['vfom','GPS VFOM','ft'],['sats','GPS sats',''],['com1','COM 1','MHz'],['com2','COM 2','MHz'],['nav1','NAV 1','MHz'],['nav2','NAV 2','MHz'],['baro','Baro setting','inHg'],['ahrsdev','AHRS dev','%'],['sfddev','SFD dev','%'],['xpdr','Transponder','code'],['gear','Gear down','0/1']]],
+];
+const CHMAP={}; for(const [g,items] of CHGROUPS) for(const it of items) CHMAP[it[0]]=[it[1],it[2],g];
+const CPAL=['--cyan','--amber','--green','--violet','--pink','--lime','--red'];
+const AXNAME=['Left','Right','Far-right'];
+let CUSTOM={ sel:[{key:'rpm',ax:0,color:'--cyan'},{key:'map',ax:1,color:'--amber'},{key:'ff',ax:2,color:'--green'}], man:[{min:null,max:null},{min:null,max:null},{min:null,max:null}], _xR:null };
+function customSave(){ try{ localStorage.setItem('flc_custom_v1', JSON.stringify({sel:CUSTOM.sel,man:CUSTOM.man})); }catch(e){} }
+function customLoad(){ try{ const s=JSON.parse(localStorage.getItem('flc_custom_v1')||'null');
+  if(s&&Array.isArray(s.sel)){ CUSTOM.sel=s.sel.filter(x=>CHMAP[x.key]); if(Array.isArray(s.man)&&s.man.length===3) CUSTOM.man=s.man; } }catch(e){} }
+function nextColor(){ const used=new Set(CUSTOM.sel.map(s=>s.color)); return CPAL.find(c=>!used.has(c))||CPAL[CUSTOM.sel.length%CPAL.length]; }
+
+function buildCustom(){
+  const grid=document.getElementById('g-custom'); grid.innerHTML='';
+  const D=F[cur].data;
+  const present=k=>D[k]&&D[k].some(v=>v!=null);
+  const selKeys=new Set(CUSTOM.sel.map(s=>s.key));
+  // control card
+  const ctl=document.createElement('div'); ctl.className='card full';
+  let h='<h3>Custom plot — build your own <span>pick channels, assign each to an axis (L / R / far-R); x is always time</span></h3>';
+  h+='<div class="cpanel">';
+  // channel groups
+  for(const [g,items] of CHGROUPS){ const avail=items.filter(it=>present(it[0])); if(!avail.length)continue;
+    h+='<div class="cgroup"><div class="cgh">'+g+'</div><div class="cgi">';
+    for(const it of avail){ const on=selKeys.has(it[0]);
+      h+='<button class="cchip'+(on?' on':'')+'" data-add="'+it[0]+'">'+it[1]+'</button>'; }
+    h+='</div></div>'; }
+  h+='</div>';
+  // selected list
+  if(CUSTOM.sel.length){ h+='<div class="csel">';
+    for(let i=0;i<CUSTOM.sel.length;i++){ const s=CUSTOM.sel[i]; const meta=CHMAP[s.key]||[s.key,'']; const dead=!present(s.key);
+      h+='<div class="crow"><i style="background:'+C(s.color)+'"></i><span class="cnm'+(dead?' dead':'')+'">'+meta[0]+(meta[1]?' <em>'+meta[1]+'</em>':'')+(dead?' (absent)':'')+'</span>';
+      h+='<span class="cax">'; for(let a=0;a<3;a++) h+='<button class="cab'+(s.ax===a?' on':'')+'" data-ax="'+i+'_'+a+'">'+['L','R','R2'][a]+'</button>'; h+='</span>';
+      h+='<button class="crm" data-rm="'+i+'">✕</button></div>'; }
+    h+='</div>'; }
+  // axis min/max config
+  h+='<div class="caxes">';
+  for(let a=0;a<3;a++){ const m=CUSTOM.man[a]; const inUse=CUSTOM.sel.some(s=>s.ax===a&&present(s.key));
+    const us=[...new Set(CUSTOM.sel.filter(s=>s.ax===a&&present(s.key)).map(s=>(CHMAP[s.key]||['',''])[1]).filter(Boolean))].join(' · ');
+    h+='<div class="caxrow'+(inUse?'':' dim')+'"><span class="caxl">'+AXNAME[a]+' axis'+(us?' <em>'+us+'</em>':'')+'</span>';
+    h+='<input type="number" step="any" placeholder="min (auto)" data-min="'+a+'" value="'+(m.min!=null?m.min:'')+'">';
+    h+='<input type="number" step="any" placeholder="max (auto)" data-max="'+a+'" value="'+(m.max!=null?m.max:'')+'">';
+    h+='<button class="caxauto" data-auto="'+a+'">Auto</button></div>'; }
+  h+='</div>';
+  ctl.innerHTML=h; grid.appendChild(ctl);
+  // chart host
+  const host=document.createElement('div'); host.id='cc-chart'; host.style.gridColumn='1 / -1'; grid.appendChild(host);
+
+  // wire events
+  ctl.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{ const k=b.dataset.add; const i=CUSTOM.sel.findIndex(s=>s.key===k);
+    if(i>=0) CUSTOM.sel.splice(i,1); else CUSTOM.sel.push({key:k,ax:0,color:nextColor()}); customSave(); buildCustom(); });
+  ctl.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{ const [i,a]=b.dataset.ax.split('_').map(Number); CUSTOM.sel[i].ax=a; customSave(); buildCustom(); });
+  ctl.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{ CUSTOM.sel.splice(+b.dataset.rm,1); customSave(); buildCustom(); });
+  ctl.querySelectorAll('[data-auto]').forEach(b=>b.onclick=()=>{ const a=+b.dataset.auto; CUSTOM.man[a]={min:null,max:null}; customSave(); buildCustom(); });
+  const upd=(a,which,val)=>{ const v=val===''?null:parseFloat(val); CUSTOM.man[a][which]=Number.isNaN(v)?null:v; customSave(); renderCustomChart(); };
+  ctl.querySelectorAll('[data-min]').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.min,'min',inp.value));
+  ctl.querySelectorAll('[data-max]').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.max,'max',inp.value));
+
+  renderCustomChart();
+}
+function renderCustomChart(){
+  const host=document.getElementById('cc-chart'); if(!host)return; host.innerHTML=''; RESIZERS=[];
+  const D=F[cur].data;
+  const sel=CUSTOM.sel.filter(s=>D[s.key]&&D[s.key].some(v=>v!=null));
+  const card=document.createElement('div'); card.className='card full'; host.appendChild(card);
+  if(!sel.length){ card.innerHTML='<h3>No channels selected <span>pick one or more channels above</span></h3>'; return; }
+  const lab=k=>{ const m=CHMAP[k]||[k,'']; return m[0]+(m[1]?' ('+m[1]+')':''); };
+  const unit=k=>(CHMAP[k]||['',''])[1];
+  const axUnit=a=>[...new Set(sel.filter(s=>s.ax===a).map(s=>unit(s.key)).filter(Boolean))].join(' · ');
+  const man=CUSTOM.man.map(m=>(m.min!=null||m.max!=null)?{min:m.min,max:m.max}:null);
+  const spec={ full:true, height:470,
+    series: sel.map(s=>({key:s.key,name:lab(s.key),color:C(s.color),ax:s.ax})),
+    yLabel:axUnit(0), y2Label:axUnit(1), axisMan:man };
+  card.innerHTML='<h3>Custom plot <span>'+sel.length+' channel'+(sel.length>1?'s':'')+' · x = time · drag to zoom, double-click resets</span></h3>';
+  const group={ xR:CUSTOM._xR||null, charts:[], setX(r){ this.xR=r?r.slice():null; CUSTOM._xR=this.xR; for(const c of this.charts)c.setX(r); } };
+  LineChart(card, spec, group);
+}
+const TABS=[['profile','Flight profile'],['engine','Engine'],['systems','Systems'],['attitude','Attitude'],['autopilot','Autopilot'],['avionics','Avionics'],['pitchloop','Pitch loop'],['rollloop','Roll loop'],['custom','Custom'],['map','Map'],['ops','Runways'],['alerts','Alerts']];
 
 function statCard(k,v,u,x,cls){ return `<div class="stat ${cls||''}"><div class="k">${k}</div><div class="v">${v==null?'\u2014':v}<span class="u"> ${u||''}</span></div>${x?`<div class="x">${x}</div>`:''}</div>`; }
 function fmtH(h){ if(h==null)return'\u2014'; const m=Math.round(h*60); return (m/60|0)+'h '+String(m%60).padStart(2,'0')+'m'; }
@@ -722,9 +838,10 @@ function buildAPModes(){ const s=F[cur].summary; const grid=document.getElementB
     `<table><thead><tr><th>Time</th><th>Lateral</th><th>Vertical</th><th>Mode</th></tr></thead><tbody>${rows||'<tr><td class="msg">No mode data</td></tr>'}</tbody></table>`;
   grid.appendChild(c); }
 function mkcard(key,full,title,sub){ const c=document.createElement('div'); c.className='card'+(full?' full':''); c.innerHTML=`<h3>${title}${sub?` <span>${sub}</span>`:''}</h3>`; document.getElementById('g-'+key).appendChild(c); return c; }
-function drawTab(key){ RESIZERS=[]; document.getElementById('hint').style.display=(key==='alerts'||key==='map'||key==='ops')?'none':'block';
+function drawTab(key){ RESIZERS=[]; document.getElementById('hint').style.display=(key==='alerts'||key==='map'||key==='ops'||key==='custom')?'none':'block';
   if(key==='alerts'){ buildAlerts(); return; }
   if(key==='ops'){ buildOps(); return; }
+  if(key==='custom'){ buildCustom(); return; }
   const grid=document.getElementById('g-'+key); grid.innerHTML='';
   if(key==='map'){ MapChart(mkcard(key,true,'Ground track','colored by baro altitude')); return; }
   const group={ xR:null, charts:[], setX(range){ this.xR=range?range.slice():null; for(const c of this.charts) c.setX(range); } };
@@ -757,7 +874,7 @@ function mount(){
 }
 
 function startApp(flights, isDaily){
-  F=flights; cur=0;
+  F=flights; cur=0; customLoad();
   PAYLOAD={flights, isDaily, title:'FlightLog'};
   DAILY = isDaily ? { n:flights.length,
     air:Number(flights.reduce((a,f)=>a+f.summary.dur_air_h,0).toFixed(1)),
